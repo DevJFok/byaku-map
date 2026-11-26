@@ -17,7 +17,12 @@ from shapely.strtree import STRtree
 
 # Manhattan bounding box: south, west, north, east.
 BBOX = (40.699, -74.022, 40.882, -73.906)
-OVERPASS = "https://overpass-api.de/api/interpreter"
+# Public Overpass servers; tried in order until one answers.
+OVERPASS_SERVERS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
 NYPD = "https://data.cityofnewyork.us/resource/5uac-w243.json"
 OUT = "data/blocks-manhattan.geojson"
 LOOKBACK_DAYS = 365
@@ -46,9 +51,17 @@ def fetch_roads():
         f'out geom;'
     )
     body = urllib.parse.urlencode({"data": query}).encode()
-    req = urllib.request.Request(OVERPASS, data=body, headers={"User-Agent": "byaku-map-build/1.0"})
-    with urllib.request.urlopen(req, timeout=400) as resp:
-        return json.load(resp)["elements"]
+    last_error = None
+    for server in OVERPASS_SERVERS:
+        try:
+            req = urllib.request.Request(server, data=body, headers={"User-Agent": "byaku-map-build/1.0"})
+            with urllib.request.urlopen(req, timeout=400) as resp:
+                print(f"roads from {server}")
+                return json.load(resp)["elements"]
+        except OSError as err:  # includes URLError and timeouts
+            print(f"{server} failed: {err}")
+            last_error = err
+    raise RuntimeError(f"All Overpass servers failed: {last_error}")
 
 
 def build_blocks(elements):
