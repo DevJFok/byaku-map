@@ -21,7 +21,7 @@ const SOURCES = {
   },
   crime: {
     url: "https://data.cityofnewyork.us/resource/5uac-w243.json", // NYPD Complaint Data (current + historic)
-    limit: 5000,
+    limit: 50000,
     lat: "latitude",
     lon: "longitude",
     date: "cmplnt_fr_dt",
@@ -60,7 +60,13 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const listingLayer = L.layerGroup().addTo(map);
 const subwayLayer = L.layerGroup();
 const crimeLayer = L.layerGroup();
-const GRID = 2; // the view is split into GRID x GRID blocks
+// Crime blocks: 2x2 Manhattan-style city blocks per cell (approximate sizes).
+// A short Manhattan block is about 80 m north-south, a long one about 275 m east-west.
+const CELL_M = { ns: 160, ew: 550 };
+const CRIME_MIN_ZOOM = 15; // below this the view is too wide to show blocks cleanly
+const CRIME_ORIGIN = [40.70, -74.02]; // fixed grid origin so blocks stay put while panning
+const stationMarkers = [];
+let crimeTimer = null;
 
 let stationsCache = null;
 const saved = JSON.parse(localStorage.getItem("byaku.listings") || "[]");
@@ -137,11 +143,14 @@ async function refreshSubwayOverlay() {
 
   // 2) Stations on top, so shared stations (transfers) stand out.
   const stations = await loadStations();
-  stations.forEach((s) =>
-    L.circleMarker([s.lat, s.lon], { radius: 4, color: "#000000", weight: 1, fillColor: "#FFFFFF", fillOpacity: 1 })
-      .bindTooltip(s.name)
-      .addTo(subwayLayer)
-  );
+  stationMarkers.length = 0;
+  stations.forEach((s) => {
+    const m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#000000", weight: 1, fillColor: "#FFFFFF", fillOpacity: 1 })
+      .bindTooltip(s.name, { direction: "right", offset: [6, 0] })
+      .addTo(subwayLayer);
+    stationMarkers.push(m);
+  });
+  updateStationLabels();
   statusEl.textContent = `Showing ${lineCount} subway route segments and ${stations.length} stations.`;
 }
 
@@ -151,6 +160,11 @@ function blockColor(t) {
 }
 
 async function refreshCrimeOverlay() {
+  crimeLayer.clearLayers();
+  if (map.getZoom() < CRIME_MIN_ZOOM) {
+    statusEl.textContent = `Zoom in to level ${CRIME_MIN_ZOOM} or closer to see crime blocks.`;
+    return;
+  }
   statusEl.textContent = "Loading crime blocks…";
   const c = SOURCES.crime;
   const b = map.getBounds();
@@ -161,37 +175,53 @@ async function refreshCrimeOverlay() {
   if (!res.ok) throw new Error(`Crime data failed (${res.status})`);
   const rows = await res.json();
 
-  // Split the current view into GRID x GRID blocks and add up severity-weighted complaints per block.
-  const latStep = (n0 - s0) / GRID, lonStep = (e0 - w0) / GRID;
-  const scores = Array.from({ length: GRID }, () => Array(GRID).fill(0));
-  const counts = Array.from({ length: GRID }, () => Array(GRID).fill(0));
+  // Cell size in degrees at this latitude.
+  const midLat = (s0 + n0) / 2;
+  const dLat = CELL_M.ns / 111000;
+  const dLon = CELL_M.ew / (111000 * Math.cos((midLat * Math.PI) / 180));
+
+  // Add up severity-weighted complaints per cell.
+  const cells = new Map();
   rows.forEach((r) => {
     const lat = Number(r[c.lat]), lon = Number(r[c.lon]);
     if (!lat || !lon) return;
-    const i = Math.min(GRID - 1, Math.floor((lat - s0) / latStep));
-    const j = Math.min(GRID - 1, Math.floor((lon - w0) / lonStep));
-    scores[i][j] += SEVERITY_WEIGHT[String(r[c.severity]).toUpperCase()] ?? 0.5;
-    counts[i][j] += 1;
+    const i = Math.floor((lat - CRIME_ORIGIN[0]) / dLat);
+    const j = Math.floor((lon - CRIME_ORIGIN[1]) / dLon);
+    const key = `${i},${j}`;
+    const cell = cells.get(key) || { i, j, score: 0, count: 0 };
+    cell.score += SEVERITY_WEIGHT[String(r[c.severity]).toUpperCase()] ?? 0.5;
+    cell.count += 1;
+    cells.set(key, cell);
   });
-  const max = Math.max(0, ...scores.flat());
+  const max = Math.max(0, ...[...cells.values()].map((x) => x.score));
 
-  crimeLayer.clearLayers();
-  for (let i = 0; i < GRID; i++) {
-    for (let j = 0; j < GRID; j++) {
-      const bounds = [
-        [s0 + i * latStep, w0 + j * lonStep],
-        [s0 + (i + 1) * latStep, w0 + (j + 1) * lonStep],
-      ];
-      const t = max > 0 ? scores[i][j] / max : 0;
-      L.rectangle(bounds, { color: "#ffffff", weight: 1, fillColor: blockColor(t), fillOpacity: 0.45 })
-        .bindTooltip(`${counts[i][j]} complaints in the last ${c.lookbackDays} days`)
-        .addTo(crimeLayer);
-    }
-  }
+  // Draw every cell that has complaints.
+  cells.forEach((cell) => {
+    const top = CRIME_ORIGIN[0] + cell.i * dLat, left = CRIME_ORIGIN[1] + cell.j * dLon;
+    const t = max > 0 ? cell.score / max : 0;
+    L.rectangle([[top, left], [top + dLat, left + dLon]], {
+      color: "#ffffff", weight: 0.5, fillColor: blockColor(t), fillOpacity: 0.5,
+    }).bindTooltip(`${cell.count} complaints in the last ${c.lookbackDays} days`).addTo(crimeLayer);
+  });
   statusEl.textContent = rows.length >= c.limit
     ? `Blocks use the first ${c.limit} complaints in view. Zoom in for detail.`
-    : `${rows.length} complaints from the last ${c.lookbackDays} days in view. Red blocks are more severe.`;
+    : `${rows.length} complaints from the last ${c.lookbackDays} days. Red blocks are more severe.`;
 }
+
+// Station names stay on the map once zoomed in; otherwise they show on hover.
+function updateStationLabels() {
+  const show = map.hasLayer(subwayLayer) && map.getZoom() >= 15;
+  stationMarkers.forEach((m) => (show ? m.openTooltip() : m.closeTooltip()));
+}
+map.on("zoomend", () => {
+  updateStationLabels();
+  if (map.hasLayer(crimeLayer) || map.hasLayer(subwayLayer)) {
+    clearTimeout(crimeTimer);
+    crimeTimer = setTimeout(() => {
+      if (map.hasLayer(crimeLayer)) refreshCrimeOverlay().catch((err) => showError(err.message));
+    }, 400);
+  }
+});
 
 // ---- Layer toggles ----
 document.getElementById("layer-subway").addEventListener("change", async (e) => {
@@ -215,7 +245,6 @@ document.getElementById("layer-crime").addEventListener("change", async (e) => {
 });
 
 // Heat zones depend on what is in view, so reload when the map moves.
-let crimeTimer = null;
 map.on("moveend", () => {
   if (!map.hasLayer(crimeLayer)) return;
   clearTimeout(crimeTimer);
