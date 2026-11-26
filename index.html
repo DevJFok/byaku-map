@@ -43,6 +43,11 @@
     <label><input type="checkbox" id="layer-subway" /> Subway lines and stations</label>
     <label><input type="checkbox" id="layer-crime" /> Crime blocks (street blocks, last 12 months)</label>
     <label><input type="checkbox" id="layer-hospitals" /> Hospitals</label>
+    <h3>My Google Maps lists</h3>
+    <p class="muted" style="margin:0 0 6px">Export from Google Takeout (Maps), then upload the list files here. Each file becomes one list.</p>
+    <input type="file" id="list-files" accept=".json,.csv,application/json,text/csv" multiple />
+    <div id="list-toggles"></div>
+    <button id="list-clear" type="button">Remove imported lists</button>
     <div id="status" class="muted"></div>
     <div id="details"></div>
   </div>

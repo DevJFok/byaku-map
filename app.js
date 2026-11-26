@@ -361,3 +361,131 @@ document.getElementById("listing-form").addEventListener("submit", async (e) => 
 });
 
 saved.forEach(renderListing);
+
+// ---- My Google Maps lists (from a Takeout upload; see README) ----
+const LIST_STORE = "byaku.mapLists";
+const LIST_COLORS = ["#1565c0", "#6a1b9a", "#2e7d32", "#ef6c00", "#00838f", "#ad1457", "#5d4037"];
+const listLayer = L.layerGroup().addTo(map);
+let mapLists = JSON.parse(localStorage.getItem(LIST_STORE) || "{}"); // name -> { color, places: [{name, lat, lon, address}] }
+const hiddenLists = new Set();
+
+// Pull coordinates out of a Google Maps place URL (the !3d/!4d pair or the @lat,lon form).
+function coordsFromUrl(url) {
+  const m = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/.exec(url || "") || /@(-?\d+\.\d+),(-?\d+\.\d+)/.exec(url || "");
+  return m ? { lat: Number(m[1]), lon: Number(m[2]) } : null;
+}
+
+// Small CSV parser that handles quoted fields with commas and line breaks.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false; }
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// Returns { places, skipped } for one uploaded Takeout file.
+function readListFile(fileName, text) {
+  const places = [];
+  let skipped = 0;
+  if (/\.json$/i.test(fileName) || text.trimStart().startsWith("{")) {
+    const data = JSON.parse(text);
+    (data.features || []).forEach((f) => {
+      const [lon, lat] = (f.geometry && f.geometry.coordinates) || [];
+      const loc = f.properties && (f.properties.location || f.properties.Location) || {};
+      if (typeof lat !== "number" || typeof lon !== "number") { skipped++; return; }
+      places.push({ name: loc["Business Name"] || f.properties.Title || "Saved place", lat, lon, address: loc.Address || "" });
+    });
+  } else {
+    const [header, ...rows] = parseCsv(text);
+    const col = (n) => header.indexOf(n);
+    const iTitle = col("Title"), iUrl = col("URL"), iNote = col("Note");
+    rows.forEach((r) => {
+      if (!r.length || !r[iUrl]) return;
+      const c = coordsFromUrl(r[iUrl]);
+      if (!c) { skipped++; return; }
+      places.push({ name: r[iTitle] || "Saved place", lat: c.lat, lon: c.lon, address: r[iNote] || "" });
+    });
+  }
+  return { places, skipped };
+}
+
+function saveLists() {
+  localStorage.setItem(LIST_STORE, JSON.stringify(mapLists));
+}
+
+function renderListToggles() {
+  const box = document.getElementById("list-toggles");
+  box.innerHTML = "";
+  Object.keys(mapLists).forEach((name) => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !hiddenLists.has(name);
+    cb.addEventListener("change", () => {
+      cb.checked ? hiddenLists.delete(name) : hiddenLists.add(name);
+      drawLists();
+    });
+    const swatch = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${mapLists[name].color};margin:0 4px"></span>`;
+    label.append(cb);
+    label.insertAdjacentHTML("beforeend", `${swatch}${esc(name)} (${mapLists[name].places.length})`);
+    box.append(label);
+  });
+}
+
+function drawLists() {
+  listLayer.clearLayers();
+  Object.entries(mapLists).forEach(([name, list]) => {
+    if (hiddenLists.has(name)) return;
+    list.places.forEach((p) => {
+      L.circleMarker([p.lat, p.lon], { radius: 6, color: "#ffffff", weight: 2, fillColor: list.color, fillOpacity: 1 })
+        .bindTooltip(esc(p.name))
+        .on("click", (e) => showOverlayPopup(e.latlng,
+          `<b>${esc(p.name)}</b><br>On list: ${esc(name)}${p.address ? `<br>${esc(p.address)}` : ""}`))
+        .addTo(listLayer);
+    });
+  });
+}
+
+document.getElementById("list-files").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  const notes = [];
+  for (const file of files) {
+    const listName = file.name.replace(/\.(json|csv)$/i, "");
+    try {
+      const { places, skipped } = readListFile(file.name, await file.text());
+      const color = mapLists[listName]?.color || LIST_COLORS[Object.keys(mapLists).length % LIST_COLORS.length];
+      mapLists[listName] = { color, places };
+      hiddenLists.delete(listName);
+      notes.push(`"${listName}": ${places.length} placed${skipped ? `, ${skipped} skipped (no coordinates; short links can't be placed)` : ""}`);
+    } catch (err) {
+      notes.push(`"${file.name}" could not be read: ${err.message}`);
+    }
+  }
+  saveLists();
+  renderListToggles();
+  drawLists();
+  statusEl.textContent = notes.join(". ") + ".";
+  e.target.value = "";
+});
+
+document.getElementById("list-clear").addEventListener("click", () => {
+  mapLists = {};
+  hiddenLists.clear();
+  saveLists();
+  renderListToggles();
+  drawLists();
+  statusEl.textContent = "Imported lists removed.";
+});
+
+renderListToggles();
+drawLists();
