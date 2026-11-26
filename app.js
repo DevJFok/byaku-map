@@ -213,6 +213,9 @@ function updateStationLabels() {
   const show = map.hasLayer(subwayLayer) && map.getZoom() >= 15;
   stationMarkers.forEach((m) => (show ? m.openTooltip() : m.closeTooltip()));
 }
+// Keep the map's size in sync when the side panel is shown or hidden.
+window.addEventListener("resize", () => map.invalidateSize());
+
 map.on("zoomend", () => {
   updateStationLabels();
   if (map.hasLayer(crimeLayer) || map.hasLayer(subwayLayer)) {

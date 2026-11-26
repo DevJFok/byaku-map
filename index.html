@@ -6,7 +6,16 @@
   <title>Byaku: apartment map (v1)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+    body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-columns: 340px 1fr; height: 100vh; transition: grid-template-columns 0.2s; }
+    body.collapsed { grid-template-columns: 0 1fr; }
+    body.collapsed #panel { display: none; }
+    #toggle {
+      position: absolute; top: 12px; left: 352px; z-index: 1000;
+      width: 36px; height: 36px; border-radius: 18px; border: 1px solid #bbb; background: #fff;
+      font-size: 16px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+      transition: left 0.2s;
+    }
+    body.collapsed #toggle { left: 12px; }
     #panel { padding: 16px; overflow-y: auto; border-right: 1px solid #ddd; }
     #map { height: 100vh; }
     label { display: block; margin-top: 10px; font-size: 14px; }
@@ -38,8 +47,25 @@
     <div id="details"></div>
   </div>
   <div id="map"></div>
+  <button id="toggle" type="button" aria-label="Hide panel">◀</button>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Collapse/expand the side panel. Starts collapsed on phone-width screens.
+    (function () {
+      const body = document.body;
+      const btn = document.getElementById("toggle");
+      function setCollapsed(on) {
+        body.classList.toggle("collapsed", on);
+        btn.textContent = on ? "▶" : "◀";
+        btn.setAttribute("aria-label", on ? "Show panel" : "Hide panel");
+        // Let the map resize to the new width once the layout has changed.
+        setTimeout(() => window.dispatchEvent(new Event("resize")), 250);
+      }
+      btn.addEventListener("click", () => setCollapsed(!body.classList.contains("collapsed")));
+      if (window.innerWidth < 600) setCollapsed(true);
+    })();
+  </script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <script type="module" src="app.js"></script>
 </body>
