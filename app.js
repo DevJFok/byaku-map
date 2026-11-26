@@ -109,11 +109,13 @@ async function refreshSubwayOverlay() {
       .bindTooltip(s.name)
       .addTo(subwayLayer)
   );
+  statusEl.textContent = `Showing ${stations.length} subway stations.`;
 }
 
 async function refreshCrimeOverlay() {
   crimeLayer.clearLayers();
   statusEl.textContent = "Loading crime complaints…";
+  console.log("[byaku] crime view", map.getBounds());
   const rows = await crimeInBox(map.getBounds());
   const c = SOURCES.crime;
   rows.forEach((r) => {
