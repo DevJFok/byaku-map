@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Byaku: apartment map (v1)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+    #panel { padding: 16px; overflow-y: auto; border-right: 1px solid #ddd; }
+    #map { height: 100vh; }
+    label { display: block; margin-top: 10px; font-size: 14px; }
+    input, select { width: 100%; padding: 6px; box-sizing: border-box; margin-top: 4px; }
+    button { margin-top: 14px; padding: 8px 12px; width: 100%; cursor: pointer; }
+    .card { border: 1px solid #ddd; border-radius: 6px; padding: 10px; margin-top: 12px; font-size: 14px; }
+    .muted { color: #666; font-size: 13px; }
+    .error { color: #b00020; font-size: 13px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <h2 style="margin-top:0">Apartment map</h2>
+    <p class="muted">Type the address yourself. We never open listing pages.</p>
+    <form id="listing-form">
+      <label>Address <input id="address" required placeholder="e.g. 350 W 42nd St, New York, NY" /></label>
+      <label>Unit type
+        <select id="unit_type"><option value="studio">Studio</option><option value="1br">1 bedroom</option></select>
+      </label>
+      <label>Monthly base rent ($) <input id="base_rent" type="number" min="0" max="5500" required /></label>
+      <label>Listing link (optional, saved as text only) <input id="source_url" type="text" placeholder="paste a link to remember it" /></label>
+      <button type="submit">Add apartment to map</button>
+    </form>
+    <div id="status" class="muted"></div>
+    <div id="details"></div>
+  </div>
+  <div id="map"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
