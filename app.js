@@ -9,8 +9,8 @@ const SOURCES = {
   lines: {
     url: "https://data.ny.gov/resource/s692-irgq.json", // MTA Subway Service Lines
     limit: 500,
-    routeFields: ["route_id", "rt_symbol", "route_symbol", "route_short_name"],
-    geomField: "the_geom",
+    routeFields: ["service", "route_id", "rt_symbol", "route_symbol"],
+    geomFields: ["geometry", "the_geom", "shape"],
   },
   stations: {
     url: "https://data.ny.gov/resource/39hk-dx4f.json", // MTA Subway Stations
@@ -59,13 +59,8 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const listingLayer = L.layerGroup().addTo(map);
 const subwayLayer = L.layerGroup();
-const crimeLayer = L.heatLayer([], {
-  radius: 25,
-  blur: 20,
-  maxZoom: 17,
-  // Yellow (low severity or density) through orange to red (high).
-  gradient: { 0.2: "#FFFF00", 0.6: "#FF8C00", 1.0: "#FF0000" },
-});
+const crimeLayer = L.layerGroup();
+const GRID = 2; // the view is split into GRID x GRID blocks
 
 let stationsCache = null;
 const saved = JSON.parse(localStorage.getItem("byaku.listings") || "[]");
@@ -120,13 +115,14 @@ async function refreshSubwayOverlay() {
   const rows = await res.json();
   if (!rows.length) throw new Error("Subway line data returned no rows.");
   const routeField = lineCfg.routeFields.find((f) => f in rows[0]);
-  if (!routeField || !(lineCfg.geomField in rows[0])) {
+  const geomField = lineCfg.geomFields.find((f) => f in rows[0]);
+  if (!routeField || !geomField) {
     throw new Error(`Subway line fields differ from config. Available: ${Object.keys(rows[0]).join(", ")}`);
   }
   let lineCount = 0;
   rows.forEach((r) => {
-    const route = String(r[routeField]).toUpperCase();
-    const geom = r[lineCfg.geomField];
+    const route = String(r[routeField] || "").trim().toUpperCase();
+    const geom = r[geomField];
     if (!geom || !geom.coordinates) return;
     const parts = geom.type === "MultiLineString" ? geom.coordinates : [geom.coordinates];
     parts.forEach((part) => {
@@ -149,22 +145,52 @@ async function refreshSubwayOverlay() {
   statusEl.textContent = `Showing ${lineCount} subway route segments and ${stations.length} stations.`;
 }
 
+function blockColor(t) {
+  // t from 0 (lowest) to 1 (highest): yellow to red.
+  return `rgb(255, ${Math.round(255 * (1 - t))}, 0)`;
+}
+
 async function refreshCrimeOverlay() {
-  statusEl.textContent = "Loading crime heat zones…";
+  statusEl.textContent = "Loading crime blocks…";
   const c = SOURCES.crime;
   const b = map.getBounds();
-  const where = `${c.date} >= '${sinceDate(c.lookbackDays)}' AND ${c.lat} >= ${b.getSouth()} AND ${c.lat} <= ${b.getNorth()} AND ${c.lon} >= ${b.getWest()} AND ${c.lon} <= ${b.getEast()}`;
+  const s0 = b.getSouth(), n0 = b.getNorth(), w0 = b.getWest(), e0 = b.getEast();
+  const where = `${c.date} >= '${sinceDate(c.lookbackDays)}' AND ${c.lat} >= ${s0} AND ${c.lat} <= ${n0} AND ${c.lon} >= ${w0} AND ${c.lon} <= ${e0}`;
   const select = [c.lat, c.lon, c.severity].join(",");
   const res = await fetch(`${c.url}?$select=${select}&$limit=${c.limit}&$where=${encodeURIComponent(where)}`);
   if (!res.ok) throw new Error(`Crime data failed (${res.status})`);
   const rows = await res.json();
-  const points = rows
-    .filter((r) => r[c.lat] && r[c.lon])
-    .map((r) => [Number(r[c.lat]), Number(r[c.lon]), SEVERITY_WEIGHT[String(r[c.severity]).toUpperCase()] ?? 0.5]);
-  crimeLayer.setLatLngs(points);
+
+  // Split the current view into GRID x GRID blocks and add up severity-weighted complaints per block.
+  const latStep = (n0 - s0) / GRID, lonStep = (e0 - w0) / GRID;
+  const scores = Array.from({ length: GRID }, () => Array(GRID).fill(0));
+  const counts = Array.from({ length: GRID }, () => Array(GRID).fill(0));
+  rows.forEach((r) => {
+    const lat = Number(r[c.lat]), lon = Number(r[c.lon]);
+    if (!lat || !lon) return;
+    const i = Math.min(GRID - 1, Math.floor((lat - s0) / latStep));
+    const j = Math.min(GRID - 1, Math.floor((lon - w0) / lonStep));
+    scores[i][j] += SEVERITY_WEIGHT[String(r[c.severity]).toUpperCase()] ?? 0.5;
+    counts[i][j] += 1;
+  });
+  const max = Math.max(0, ...scores.flat());
+
+  crimeLayer.clearLayers();
+  for (let i = 0; i < GRID; i++) {
+    for (let j = 0; j < GRID; j++) {
+      const bounds = [
+        [s0 + i * latStep, w0 + j * lonStep],
+        [s0 + (i + 1) * latStep, w0 + (j + 1) * lonStep],
+      ];
+      const t = max > 0 ? scores[i][j] / max : 0;
+      L.rectangle(bounds, { color: "#ffffff", weight: 1, fillColor: blockColor(t), fillOpacity: 0.45 })
+        .bindTooltip(`${counts[i][j]} complaints in the last ${c.lookbackDays} days`)
+        .addTo(crimeLayer);
+    }
+  }
   statusEl.textContent = rows.length >= c.limit
-    ? `Heat zones use the first ${c.limit} complaints in view. Zoom in for detail.`
-    : `Heat zones use ${points.length} complaints from the last ${c.lookbackDays} days in view. Red is more severe.`;
+    ? `Blocks use the first ${c.limit} complaints in view. Zoom in for detail.`
+    : `${rows.length} complaints from the last ${c.lookbackDays} days in view. Red blocks are more severe.`;
 }
 
 // ---- Layer toggles ----
