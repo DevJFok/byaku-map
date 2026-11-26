@@ -10,7 +10,7 @@
     body.collapsed { grid-template-columns: 0 1fr; }
     body.collapsed #panel { display: none; }
     #toggle {
-      position: absolute; top: 12px; left: 352px; z-index: 1000;
+      position: absolute; top: 50%; transform: translateY(-50%); left: 352px; z-index: 1000;
       width: 36px; height: 36px; border-radius: 18px; border: 1px solid #bbb; background: #fff;
       font-size: 16px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
       transition: left 0.2s;
@@ -42,7 +42,7 @@
     <h3>Map layers</h3>
     <label><input type="checkbox" id="layer-subway" /> Subway lines and stations</label>
     <label><input type="checkbox" id="layer-crime" /> Crime blocks (street blocks, last 12 months)</label>
-    <label class="muted"><input type="checkbox" disabled /> Hospitals (coming next)</label>
+    <label><input type="checkbox" id="layer-hospitals" /> Hospitals</label>
     <div id="status" class="muted"></div>
     <div id="details"></div>
   </div>

@@ -186,6 +186,34 @@ async function refreshCrimeOverlay() {
 window.addEventListener("resize", () => map.invalidateSize());
 map.on("zoomend", () => updateStationLabels());
 
+// ---- Hospitals (precomputed, see scripts/build_blocks.py) ----
+const hospitalLayer = L.layerGroup();
+let hospitalsLoaded = false;
+async function refreshHospitalOverlay() {
+  statusEl.textContent = "Loading hospitals…";
+  if (!hospitalsLoaded) {
+    const res = await fetch("data/hospitals-manhattan.geojson");
+    if (!res.ok) throw new Error(`Hospital data not available (${res.status}). Run the build-crime-blocks workflow on GitHub.`);
+    const data = await res.json();
+    L.geoJSON(data.features, {
+      pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: "#ffffff", weight: 2, fillColor: "#d32f2f", fillOpacity: 1 }),
+      onEachFeature: (f, layer) => layer.bindTooltip(`${f.properties.name} (hospital)`),
+    }).addTo(hospitalLayer);
+    hospitalsLoaded = true;
+  }
+  statusEl.textContent = "Hospitals shown as red dots.";
+}
+
+document.getElementById("layer-hospitals").addEventListener("change", async (e) => {
+  if (e.target.checked) {
+    hospitalLayer.addTo(map);
+    try { await refreshHospitalOverlay(); } catch (err) { showError(err.message); }
+  } else {
+    map.removeLayer(hospitalLayer);
+    statusEl.textContent = "";
+  }
+});
+
 // ---- Layer toggles ----
 document.getElementById("layer-subway").addEventListener("change", async (e) => {
   if (e.target.checked) {

@@ -140,6 +140,47 @@ def to_geojson(blocks, scores, counts):
     }
 
 
+def fetch_hospitals():
+    s, w, n, e = BBOX
+    query = (
+        f'[out:json][timeout:300];'
+        f'(node["amenity"="hospital"]({s},{w},{n},{e});way["amenity"="hospital"]({s},{w},{n},{e}););'
+        f'out center;'
+    )
+    body = urllib.parse.urlencode({"data": query}).encode()
+    last_error = None
+    for server in OVERPASS_SERVERS:
+        try:
+            req = urllib.request.Request(server, data=body, headers={"User-Agent": "byaku-map-build/1.0"})
+            with urllib.request.urlopen(req, timeout=400) as resp:
+                elements = json.load(resp)["elements"]
+            break
+        except OSError as err:
+            print(f"{server} failed: {err}")
+            last_error = err
+    else:
+        raise RuntimeError(f"All Overpass servers failed: {last_error}")
+    features = []
+    for el in elements:
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        if lat is None or lon is None:
+            continue
+        tags = el.get("tags", {})
+        features.append({
+            "type": "Feature",
+            "properties": {"name": tags.get("name", "Hospital")},
+            "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
+        })
+    print(f"hospitals: {len(features)}")
+    return {
+        "type": "FeatureCollection",
+        "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "source": "Hospital locations: OpenStreetMap contributors (ODbL).",
+        "features": features,
+    }
+
+
 def main():
     blocks = build_blocks(fetch_roads())
     complaints = fetch_crime()
@@ -149,6 +190,11 @@ def main():
     with open(OUT, "w") as f:
         json.dump(out, f, separators=(",", ":"))
     print(f"wrote {OUT}: {len(out['features'])} blocks")
+
+    hospitals = fetch_hospitals()
+    with open("data/hospitals-manhattan.geojson", "w") as f:
+        json.dump(hospitals, f, separators=(",", ":"))
+    print(f"wrote data/hospitals-manhattan.geojson: {len(hospitals['features'])} hospitals")
 
 
 if __name__ == "__main__":
