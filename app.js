@@ -57,7 +57,7 @@ const detailsEl = document.getElementById("details");
 // Canvas overlays and zoom animation don't stay in step: during the zoom
 // animation the basemap scales while the overlays jump. Turning off the zoom
 // animation keeps the blocks and lines locked to the basemap.
-const map = L.map("map", { preferCanvas: true, zoomAnimation: false }).setView([40.7580, -73.9855], 13);
+const map = L.map("map", { zoomAnimation: false }).setView([40.7580, -73.9855], 13);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
@@ -180,6 +180,12 @@ async function refreshCrimeOverlay() {
       layer.bindTooltip(`${f.properties.count} complaints in the last ${crimeData.lookbackDays} days`),
   }).addTo(crimeLayer);
   statusEl.textContent = `Crime blocks cover the last ${crimeData.lookbackDays} days (updated ${crimeData.generated.slice(0, 10)}). Red is more severe.`;
+}
+
+// Station names stay on the map once zoomed in; otherwise they show on hover.
+function updateStationLabels() {
+  const show = map.hasLayer(subwayLayer) && map.getZoom() >= 15;
+  stationMarkers.forEach((m) => (show ? m.openTooltip() : m.closeTooltip()));
 }
 
 // Keep the map's size in sync when the side panel is shown or hidden.
