@@ -52,7 +52,9 @@ const statusEl = document.getElementById("status");
 const detailsEl = document.getElementById("details");
 
 // Basemap: OpenStreetMap, free, no billing needed.
-const map = L.map("map").setView([40.7580, -73.9855], 13);
+// preferCanvas draws the overlays on the map itself, so they stay locked to the
+// basemap while dragging (SVG overlays could drift on some browsers, including iPhone Safari).
+const map = L.map("map", { preferCanvas: true }).setView([40.7580, -73.9855], 13);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
