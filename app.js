@@ -65,6 +65,9 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const listingLayer = L.layerGroup().addTo(map);
 const subwayLayer = L.layerGroup();
 const crimeLayer = L.layerGroup();
+// Crime blocks sit in their own pane under the subway lines, so lines and stations stay clickable.
+map.createPane("crimePane");
+map.getPane("crimePane").style.zIndex = 350;
 // Crime blocks: 2x2 Manhattan-style city blocks per cell (approximate sizes).
 // A short Manhattan block is about 80 m north-south, a long one about 275 m east-west.
 const CELL_M = { ns: 160, ew: 550 };
@@ -114,6 +117,30 @@ async function loadStations() {
   return stationsCache;
 }
 
+function esc(t) {
+  return String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Popup on any overlay click: the clicked item's info plus the closest subway station.
+async function showOverlayPopup(latlng, infoHtml) {
+  let stationLine = "";
+  try {
+    const stations = await loadStations();
+    let best = null;
+    for (const s of stations) {
+      const d = distanceM(latlng.lat, latlng.lng, s.lat, s.lon);
+      if (!best || d < best.d) best = { ...s, d };
+    }
+    if (best) {
+      const walkMin = Math.max(1, Math.round(best.d / 80)); // about 80 m per minute on foot
+      stationLine = `Closest subway station: <b>${esc(best.name)}</b><br>${Math.round(best.d)} m away (about ${walkMin} min walk)`;
+    }
+  } catch (err) {
+    stationLine = "Subway station data unavailable.";
+  }
+  L.popup({ maxWidth: 280 }).setLatLng(latlng).setContent(`${infoHtml}<br>${stationLine}`).openOn(map);
+}
+
 async function refreshSubwayOverlay() {
   subwayLayer.clearLayers();
   statusEl.textContent = "Loading subway lines…";
@@ -140,7 +167,9 @@ async function refreshSubwayOverlay() {
         color: ROUTE_COLORS[route] || "#555555",
         weight: 4,
         opacity: 0.9,
-      }).bindTooltip(`${route} train`).addTo(subwayLayer);
+      }).bindTooltip(`${route} train`)
+        .on("click", (e) => showOverlayPopup(e.latlng, `<b>${esc(route)} train</b>`))
+        .addTo(subwayLayer);
       lineCount++;
     });
   });
@@ -151,6 +180,7 @@ async function refreshSubwayOverlay() {
   stations.forEach((s) => {
     const m = L.circleMarker([s.lat, s.lon], { radius: 4, color: "#000000", weight: 1, fillColor: "#FFFFFF", fillOpacity: 1 })
       .bindTooltip(s.name, { direction: "right", offset: [6, 0] })
+      .on("click", (e) => showOverlayPopup(e.latlng, `<b>${esc(s.name)}</b> (subway station)`))
       .addTo(subwayLayer);
     stationMarkers.push(m);
   });
@@ -165,6 +195,14 @@ function blockColor(t) {
 
 // Crime blocks are precomputed (see scripts/build_blocks.py) and loaded once.
 let crimeData = null;
+// Share of blocks with a strictly higher score, i.e. how much safer this block is than the rest.
+function percentSafer(score, sortedScores) {
+  let lo = 0, hi = sortedScores.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (sortedScores[mid] <= score) lo = mid + 1; else hi = mid; }
+  const higher = sortedScores.length - lo;
+  return Math.round((higher / sortedScores.length) * 100);
+}
+
 async function refreshCrimeOverlay() {
   crimeLayer.clearLayers();
   statusEl.textContent = "Loading crime blocks…";
@@ -174,10 +212,20 @@ async function refreshCrimeOverlay() {
     crimeData = await res.json();
   }
   const max = crimeData.maxScore || 1;
+  const sorted = crimeData.features.map((f) => f.properties.score).sort((a, b) => a - b);
   L.geoJSON(crimeData.features, {
+    pane: "crimePane",
     style: (f) => ({ color: "#ffffff", weight: 0.5, fillColor: blockColor(f.properties.score / max), fillOpacity: 0.5 }),
-    onEachFeature: (f, layer) =>
-      layer.bindTooltip(`${f.properties.count} complaints in the last ${crimeData.lookbackDays} days`),
+    onEachFeature: (f, layer) => {
+      const p = f.properties;
+      layer.bindTooltip(`${p.count} complaints in the last ${crimeData.lookbackDays} days`);
+      layer.on("click", (e) => {
+        const pct = percentSafer(p.score, sorted);
+        const info = `<b>Crime block</b><br>${p.count} complaints in the last ${crimeData.lookbackDays} days<br>` +
+          `Safer than <b>${pct}%</b> of Manhattan blocks`;
+        showOverlayPopup(e.latlng, info);
+      });
+    },
   }).addTo(crimeLayer);
   statusEl.textContent = `Crime blocks cover the last ${crimeData.lookbackDays} days (updated ${crimeData.generated.slice(0, 10)}). Red is more severe.`;
 }
@@ -203,7 +251,9 @@ async function refreshHospitalOverlay() {
     const data = await res.json();
     L.geoJSON(data.features, {
       pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 6, color: "#ffffff", weight: 2, fillColor: "#d32f2f", fillOpacity: 1 }),
-      onEachFeature: (f, layer) => layer.bindTooltip(`${f.properties.name} (hospital)`),
+      onEachFeature: (f, layer) => layer
+        .bindTooltip(`${f.properties.name} (hospital)`)
+        .on("click", (e) => showOverlayPopup(e.latlng, `<b>${esc(f.properties.name)}</b> (hospital)`)),
     }).addTo(hospitalLayer);
     hospitalsLoaded = true;
   }
