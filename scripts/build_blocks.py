@@ -8,6 +8,7 @@ Data: OpenStreetMap (ODbL) and NYPD Complaint Data (NYC Open Data).
 import datetime
 import json
 import math
+import os
 import urllib.parse
 import urllib.request
 
@@ -144,6 +145,7 @@ def main():
     complaints = fetch_crime()
     scores, counts = score_blocks(blocks, complaints)
     out = to_geojson(blocks, scores, counts)
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as f:
         json.dump(out, f, separators=(",", ":"))
     print(f"wrote {OUT}: {len(out['features'])} blocks")
