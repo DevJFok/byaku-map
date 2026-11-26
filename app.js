@@ -54,7 +54,10 @@ const detailsEl = document.getElementById("details");
 // Basemap: OpenStreetMap, free, no billing needed.
 // preferCanvas draws the overlays on the map itself, so they stay locked to the
 // basemap while dragging (SVG overlays could drift on some browsers, including iPhone Safari).
-const map = L.map("map", { preferCanvas: true }).setView([40.7580, -73.9855], 13);
+// Canvas overlays and zoom animation don't stay in step: during the zoom
+// animation the basemap scales while the overlays jump. Turning off the zoom
+// animation keeps the blocks and lines locked to the basemap.
+const map = L.map("map", { preferCanvas: true, zoomAnimation: false }).setView([40.7580, -73.9855], 13);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
